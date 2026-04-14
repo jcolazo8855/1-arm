@@ -1,13 +1,10 @@
+
 import random
 from dataclasses import dataclass
-from typing import List
 
-import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
-
-
-st.set_page_config(page_title="One-Armed Bandit Demo", page_icon="🎰", layout="wide")
+import matplotlib.pyplot as plt
 
 
 @dataclass
@@ -20,102 +17,147 @@ class RoundResult:
     pulls_of_arm: int
 
 
+KEY_N_ARMS = "bandit_n_arms"
+KEY_TRUE_PROBS = "bandit_true_probs"
+KEY_HISTORY = "bandit_history"
+KEY_COUNTS = "bandit_counts"
+KEY_ESTIMATES = "bandit_estimates"
+KEY_ROUND_NO = "bandit_round_no"
+KEY_TOTAL_REWARD = "bandit_total_reward"
+KEY_REVEAL = "bandit_reveal_probs"
+
+
+def random_probs(n_arms: int) -> list[float]:
+    return [round(random.uniform(0.1, 0.9), 2) for _ in range(n_arms)]
+
+
 def sync_state_lengths() -> None:
-    n_arms = int(st.session_state.get("n_arms", 5))
+    n_arms = int(st.session_state.get(KEY_N_ARMS, 5))
 
-    if "true_probs" not in st.session_state or len(st.session_state.true_probs) != n_arms:
-        st.session_state.true_probs = [round(random.uniform(0.1, 0.9), 2) for _ in range(n_arms)]
+    true_probs = st.session_state.get(KEY_TRUE_PROBS)
+    if not isinstance(true_probs, list) or len(true_probs) != n_arms:
+        st.session_state[KEY_TRUE_PROBS] = random_probs(n_arms)
 
-    if "counts" not in st.session_state or len(st.session_state.counts) != n_arms:
-        current_counts = list(st.session_state.get("counts", []))[:n_arms]
-        st.session_state.counts = current_counts + [0] * (n_arms - len(current_counts))
+    counts = st.session_state.get(KEY_COUNTS)
+    if not isinstance(counts, list):
+        st.session_state[KEY_COUNTS] = [0] * n_arms
+    elif len(counts) != n_arms:
+        st.session_state[KEY_COUNTS] = counts[:n_arms] + [0] * max(0, n_arms - len(counts))
 
-    if "values" not in st.session_state or len(st.session_state.values) != n_arms:
-        current_values = list(st.session_state.get("values", []))[:n_arms]
-        st.session_state.values = current_values + [0.0] * (n_arms - len(current_values))
+    estimates = st.session_state.get(KEY_ESTIMATES)
+    if not isinstance(estimates, list):
+        st.session_state[KEY_ESTIMATES] = [0.0] * n_arms
+    elif len(estimates) != n_arms:
+        st.session_state[KEY_ESTIMATES] = estimates[:n_arms] + [0.0] * max(0, n_arms - len(estimates))
+
+    history = st.session_state.get(KEY_HISTORY)
+    if not isinstance(history, list):
+        st.session_state[KEY_HISTORY] = []
+
+    if not isinstance(st.session_state.get(KEY_ROUND_NO), int):
+        st.session_state[KEY_ROUND_NO] = 0
+
+    if not isinstance(st.session_state.get(KEY_TOTAL_REWARD), int):
+        st.session_state[KEY_TOTAL_REWARD] = 0
+
+    if not isinstance(st.session_state.get(KEY_REVEAL), bool):
+        st.session_state[KEY_REVEAL] = False
+
+
+def init_state() -> None:
+    if KEY_N_ARMS not in st.session_state or not isinstance(st.session_state.get(KEY_N_ARMS), int):
+        st.session_state[KEY_N_ARMS] = 5
+    sync_state_lengths()
 
 
 def reset_progress(keep_bandits: bool = True) -> None:
-    n_arms = int(st.session_state.get("n_arms", 5))
+    n_arms = int(st.session_state.get(KEY_N_ARMS, 5))
+    if not keep_bandits:
+        st.session_state[KEY_TRUE_PROBS] = random_probs(n_arms)
 
-    if not keep_bandits or "true_probs" not in st.session_state or len(st.session_state.true_probs) != n_arms:
-        st.session_state.true_probs = [round(random.uniform(0.1, 0.9), 2) for _ in range(n_arms)]
-
-    st.session_state.history = []
-    st.session_state.counts = [0] * n_arms
-    st.session_state.values = [0.0] * n_arms
-    st.session_state.round_no = 0
-    st.session_state.total_reward = 0
+    st.session_state[KEY_HISTORY] = []
+    st.session_state[KEY_COUNTS] = [0] * n_arms
+    st.session_state[KEY_ESTIMATES] = [0.0] * n_arms
+    st.session_state[KEY_ROUND_NO] = 0
+    st.session_state[KEY_TOTAL_REWARD] = 0
     sync_state_lengths()
 
 
 def regenerate_bandits(n_arms: int) -> None:
-    st.session_state.n_arms = int(n_arms)
-    st.session_state.true_probs = [round(random.uniform(0.1, 0.9), 2) for _ in range(n_arms)]
+    st.session_state[KEY_N_ARMS] = int(n_arms)
+    st.session_state[KEY_TRUE_PROBS] = random_probs(int(n_arms))
     reset_progress(keep_bandits=True)
 
 
-def init_state() -> None:
-    if "n_arms" not in st.session_state:
-        st.session_state.n_arms = 5
-    if "history" not in st.session_state:
-        st.session_state.history = []
-    if "round_no" not in st.session_state:
-        st.session_state.round_no = 0
-    if "total_reward" not in st.session_state:
-        st.session_state.total_reward = 0
-    sync_state_lengths()
-
-
 def pull_arm(arm_index: int) -> int:
-    p = st.session_state.true_probs[arm_index]
+    sync_state_lengths()
+    p = st.session_state[KEY_TRUE_PROBS][arm_index]
     return 1 if random.random() < p else 0
 
 
 def update_estimate(arm_index: int, reward: int) -> None:
-    st.session_state.counts[arm_index] += 1
-    n = st.session_state.counts[arm_index]
-    current_value = st.session_state.values[arm_index]
-    st.session_state.values[arm_index] = current_value + (reward - current_value) / n
+    sync_state_lengths()
+    counts = st.session_state[KEY_COUNTS]
+    estimates = st.session_state[KEY_ESTIMATES]
+
+    counts[arm_index] += 1
+    n = counts[arm_index]
+    current_value = estimates[arm_index]
+    estimates[arm_index] = current_value + (reward - current_value) / n
+
+    st.session_state[KEY_COUNTS] = counts
+    st.session_state[KEY_ESTIMATES] = estimates
 
 
 def play_round(arm_index: int) -> None:
     reward = pull_arm(arm_index)
     update_estimate(arm_index, reward)
-    st.session_state.round_no += 1
-    st.session_state.total_reward += reward
 
-    result = RoundResult(
-        round_no=st.session_state.round_no,
-        chosen_arm=arm_index + 1,
-        reward=reward,
-        cumulative_reward=st.session_state.total_reward,
-        estimated_value=st.session_state.values[arm_index],
-        pulls_of_arm=st.session_state.counts[arm_index],
+    st.session_state[KEY_ROUND_NO] += 1
+    st.session_state[KEY_TOTAL_REWARD] += reward
+
+    history = st.session_state[KEY_HISTORY]
+    history.append(
+        RoundResult(
+            round_no=st.session_state[KEY_ROUND_NO],
+            chosen_arm=arm_index + 1,
+            reward=reward,
+            cumulative_reward=st.session_state[KEY_TOTAL_REWARD],
+            estimated_value=st.session_state[KEY_ESTIMATES][arm_index],
+            pulls_of_arm=st.session_state[KEY_COUNTS][arm_index],
+        )
     )
-    st.session_state.history.append(result)
+    st.session_state[KEY_HISTORY] = history
 
 
 def select_arm_epsilon_greedy(epsilon: float) -> int:
-    for i, c in enumerate(st.session_state.counts):
+    sync_state_lengths()
+    counts = st.session_state[KEY_COUNTS]
+    estimates = st.session_state[KEY_ESTIMATES]
+    n_arms = st.session_state[KEY_N_ARMS]
+
+    for i, c in enumerate(counts):
         if c == 0:
             return i
 
     if random.random() < epsilon:
-        return random.randint(0, st.session_state.n_arms - 1)
+        return random.randint(0, n_arms - 1)
 
-    best_value = max(st.session_state.values)
-    best_arms = [i for i, v in enumerate(st.session_state.values) if v == best_value]
+    best_value = max(estimates)
+    best_arms = [i for i, v in enumerate(estimates) if v == best_value]
     return random.choice(best_arms)
 
 
 def autoplay(n_rounds: int, epsilon: float) -> None:
     for _ in range(n_rounds):
-        play_round(select_arm_epsilon_greedy(epsilon))
+        arm_index = select_arm_epsilon_greedy(epsilon)
+        play_round(arm_index)
 
 
 def history_df() -> pd.DataFrame:
-    if not st.session_state.history:
+    sync_state_lengths()
+    history = st.session_state[KEY_HISTORY]
+    if not history:
         return pd.DataFrame(
             columns=[
                 "Round",
@@ -137,25 +179,28 @@ def history_df() -> pd.DataFrame:
                 "Estimated Value of Chosen Arm": round(r.estimated_value, 3),
                 "Pulls of Chosen Arm": r.pulls_of_arm,
             }
-            for r in st.session_state.history
+            for r in history
         ]
     )
 
 
 def arm_summary_df() -> pd.DataFrame:
     sync_state_lengths()
-    reveal = bool(st.session_state.get("reveal_probs", False))
-    best_prob = max(st.session_state.true_probs)
-    rows = []
+    reveal = st.session_state[KEY_REVEAL]
+    true_probs = st.session_state[KEY_TRUE_PROBS]
+    counts = st.session_state[KEY_COUNTS]
+    estimates = st.session_state[KEY_ESTIMATES]
+    best_prob = max(true_probs)
 
-    for i in range(st.session_state.n_arms):
+    rows = []
+    for i in range(st.session_state[KEY_N_ARMS]):
         rows.append(
             {
                 "Arm": f"Arm {i + 1}",
-                "Pulls": st.session_state.counts[i],
-                "Estimated Reward Rate": round(float(st.session_state.values[i]), 3),
-                "True Reward Probability": st.session_state.true_probs[i] if reveal else "Hidden",
-                "Best Arm": "Yes" if reveal and st.session_state.true_probs[i] == best_prob else "",
+                "Pulls": counts[i],
+                "Estimated Reward Rate": round(estimates[i], 3),
+                "True Reward Probability": true_probs[i] if reveal else "Hidden",
+                "Best Arm": "Yes" if reveal and true_probs[i] == best_prob else "",
             }
         )
     return pd.DataFrame(rows)
@@ -175,8 +220,8 @@ def plot_cumulative_reward(df: pd.DataFrame):
 def plot_arm_estimates():
     sync_state_lengths()
     fig, ax = plt.subplots(figsize=(8, 4.5))
-    x = list(range(1, st.session_state.n_arms + 1))
-    ax.bar(x, st.session_state.values)
+    x = list(range(1, st.session_state[KEY_N_ARMS] + 1))
+    ax.bar(x, st.session_state[KEY_ESTIMATES])
     ax.set_xticks(x)
     ax.set_xlabel("Arm")
     ax.set_ylabel("Estimated Reward Rate")
@@ -187,11 +232,13 @@ def plot_arm_estimates():
 
 
 def main() -> None:
+    st.set_page_config(page_title="One-Armed Bandit Demo", page_icon="🎰", layout="wide")
     init_state()
 
     st.title("🎰 One-Armed Bandit Demo")
     st.caption(
-        "A simple reinforcement learning classroom demo showing exploration, exploitation, hidden reward probabilities, and cumulative performance."
+        "A simple reinforcement learning classroom demo showing exploration, "
+        "exploitation, hidden reward probabilities, and cumulative performance."
     )
 
     st.sidebar.header("Controls")
@@ -200,24 +247,40 @@ def main() -> None:
         "Number of arms",
         min_value=2,
         max_value=10,
-        value=int(st.session_state.n_arms),
+        value=int(st.session_state[KEY_N_ARMS]),
     )
-    if n_arms_input != st.session_state.n_arms:
-        regenerate_bandits(n_arms_input)
+    if n_arms_input != st.session_state[KEY_N_ARMS]:
+        regenerate_bandits(int(n_arms_input))
         st.rerun()
 
-    st.session_state.reveal_probs = st.sidebar.checkbox("Reveal true reward probabilities", value=False)
-    epsilon = st.sidebar.slider("Autoplay epsilon (exploration rate)", 0.0, 1.0, 0.10, 0.01)
-    autoplay_rounds = st.sidebar.slider("Autoplay rounds", 1, 500, 50, 1)
+    st.session_state[KEY_REVEAL] = st.sidebar.checkbox(
+        "Reveal true reward probabilities",
+        value=bool(st.session_state.get(KEY_REVEAL, False)),
+    )
 
-    col1, col2 = st.sidebar.columns(2)
-    with col1:
+    epsilon = st.sidebar.slider(
+        "Autoplay epsilon (exploration rate)",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.10,
+        step=0.01,
+    )
+    autoplay_rounds = st.sidebar.slider(
+        "Autoplay rounds",
+        min_value=1,
+        max_value=500,
+        value=50,
+        step=1,
+    )
+
+    col_sb1, col_sb2 = st.sidebar.columns(2)
+    with col_sb1:
         if st.button("Reset rounds"):
             reset_progress(keep_bandits=True)
             st.rerun()
-    with col2:
+    with col_sb2:
         if st.button("New bandits"):
-            regenerate_bandits(st.session_state.n_arms)
+            regenerate_bandits(st.session_state[KEY_N_ARMS])
             st.rerun()
 
     if st.sidebar.button("Run autoplay"):
@@ -226,22 +289,30 @@ def main() -> None:
 
     metric_cols = st.columns(4)
     with metric_cols[0]:
-        st.metric("Rounds played", st.session_state.round_no)
+        st.metric("Rounds played", st.session_state[KEY_ROUND_NO])
     with metric_cols[1]:
-        st.metric("Total reward", st.session_state.total_reward)
+        st.metric("Total reward", st.session_state[KEY_TOTAL_REWARD])
     with metric_cols[2]:
-        avg_reward = round(st.session_state.total_reward / st.session_state.round_no, 3) if st.session_state.round_no else 0.0
+        avg_reward = (
+            round(st.session_state[KEY_TOTAL_REWARD] / st.session_state[KEY_ROUND_NO], 3)
+            if st.session_state[KEY_ROUND_NO] > 0
+            else 0.0
+        )
         st.metric("Average reward", avg_reward)
     with metric_cols[3]:
-        best_arm = st.session_state.true_probs.index(max(st.session_state.true_probs)) + 1
-        st.metric("Best arm", f"Arm {best_arm}" if st.session_state.reveal_probs else "Hidden")
+        best_arm = st.session_state[KEY_TRUE_PROBS].index(max(st.session_state[KEY_TRUE_PROBS])) + 1
+        st.metric("Best arm", f"Arm {best_arm}" if st.session_state[KEY_REVEAL] else "Hidden")
 
     st.divider()
-    st.subheader("Manual Play")
-    st.write("Each pull yields reward **1** or **0**. The true probabilities stay hidden unless you reveal them.")
 
-    button_cols = st.columns(st.session_state.n_arms)
-    for i in range(st.session_state.n_arms):
+    st.subheader("Manual Play")
+    st.write(
+        "Each button pull gives either reward **1** or **0**. "
+        "The true probabilities are hidden unless you choose to reveal them."
+    )
+
+    button_cols = st.columns(st.session_state[KEY_N_ARMS])
+    for i in range(st.session_state[KEY_N_ARMS]):
         if button_cols[i].button(f"Pull Arm {i + 1}", use_container_width=True):
             play_round(i)
             st.rerun()
@@ -268,8 +339,8 @@ def main() -> None:
 - At the beginning, the agent knows nothing.
 - Early experimentation is **exploration**.
 - Repeatedly choosing the arm with the best observed average is **exploitation**.
-- Estimated values improve with more pulls, but they are noisy early on.
-- A small epsilon helps the algorithm keep checking whether a weaker-looking arm may actually be better.
+- The estimated values improve with more pulls, but they are noisy early on.
+- A small epsilon helps the algorithm keep checking whether a seemingly weaker arm might actually be better.
 
 ### Good classroom prompts
 - Why not always pick the arm with the best current estimate?
@@ -277,11 +348,11 @@ def main() -> None:
 - What happens if epsilon is too high?
 - Why can a bad arm look good early on?
 - How is this different from supervised learning?
-            """
+"""
         )
 
     with st.expander("How to run this app"):
-        st.code("pip install streamlit pandas matplotlib\nstreamlit run one_armed_bandit_demo.py", language="bash")
+        st.code("pip install streamlit pandas matplotlib\nstreamlit run one_armed_bandit_demo_fixed.py", language="bash")
 
 
 if __name__ == "__main__":
