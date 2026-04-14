@@ -40,7 +40,7 @@ def init_state() -> None:
         st.session_state.n_arms = 5
 
     if "true_probs" not in st.session_state:
-        regenerate_bandits(st.session_state.n_arms)
+        st.session_state.true_probs = [round(random.uniform(0.1, 0.9), 2) for _ in range(st.session_state.n_arms)]
 
     if "history" not in st.session_state:
         st.session_state.history = []
@@ -57,8 +57,14 @@ def init_state() -> None:
     if "total_reward" not in st.session_state:
         st.session_state.total_reward = 0
 
+    sync_state_lengths()
 
-def regenerate_bandits(n_arms: int) -> None:
+
+def sync_state_lengths() -> None:
+    n_arms = st.session_state.n_arms
+
+    if "true_probs" not in st.session_state or len(st.session_state.true_probs) != n_arms:
+        st.session_state.true_probs = [round(random.uniform(0.1,(n_arms: int) -> None:
     st.session_state.n_arms = n_arms
     st.session_state.true_probs = [round(random.uniform(0.1, 0.9), 2) for _ in range(n_arms)]
     reset_progress(keep_bandits=True)
