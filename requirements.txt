@@ -1,0 +1,6 @@
+random
+dataclasses
+typing
+pandas
+streamlit
+matplotlib
